@@ -1,5 +1,7 @@
+import { useState } from 'react'
 import type { TemplateSummary } from '../../types/templates'
 import { useCamera } from './useCamera'
+import { CameraOverlay, OverlayModeToggle, type OverlayMode } from '../overlay'
 
 type CameraModeProps = {
   template: TemplateSummary
@@ -15,6 +17,7 @@ const statusText = {
 }
 
 export const CameraMode = ({ template, onBack }: CameraModeProps) => {
+  const [overlayMode, setOverlayMode] = useState<OverlayMode>('guide')
   const {
     videoRef,
     devices,
@@ -45,7 +48,13 @@ export const CameraMode = ({ template, onBack }: CameraModeProps) => {
 
       <div className="camera-layout">
         <div className="camera-preview-card">
-          <div className="camera-preview">
+          <div className="camera-preview camera-preview--with-overlay">
+            <OverlayModeToggle
+              mode={overlayMode}
+              onChange={setOverlayMode}
+              disabled={!isActive}
+            />
+
             <video
               ref={videoRef}
               className="camera-video"
@@ -54,12 +63,14 @@ export const CameraMode = ({ template, onBack }: CameraModeProps) => {
               muted
             />
 
+            {isActive && <CameraOverlay mode={overlayMode} template={template} />}
+
             {!isActive && (
               <div className="camera-empty-state">
                 <p className="camera-empty-title">Live camera belum aktif</p>
                 <p>
                   Klik <strong>Start Camera</strong> untuk membuka liveview.
-                  Overlay guide/template akan masuk di Slice 03.
+                  Overlay guide/template aktif setelah kamera berjalan.
                 </p>
               </div>
             )}
@@ -144,7 +155,7 @@ export const CameraMode = ({ template, onBack }: CameraModeProps) => {
             <p className="panel-eyebrow">Catatan Slice 02</p>
             <ul className="mini-list">
               <li>Liveview kamera aktif dari browser.</li>
-              <li>Overlay belum ditampilkan di slice ini.</li>
+              <li>Overlay guide/template tampil dari asset template.</li>
               <li>Capture foto masuk Slice 04.</li>
               <li>Proses foto tetap local-first.</li>
             </ul>

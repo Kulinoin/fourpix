@@ -73,3 +73,27 @@ Notes:
 - Removed distracting full-page background grid lines.
 - Kept slate-blue-cyan 4Pix camera-tech theme.
 - Replaced previous Slice 02 archive with a final clean archive.
+
+## Slice 03 — Overlay Engine
+
+- Added reusable overlay engine for live camera view.
+- Added guide/template overlay mode toggle.
+- Integrated selected template overlay assets into camera liveview.
+- Overlay source remains template registry driven, not hardcoded.
+- Archive is created after validation PASS.
+
+## Slice 03 — Overlay Asset URL Fix
+
+- Found manual issue: overlay UI/toggle appeared, but template overlay image did not load visibly.
+- Root cause: backend returned relative template asset paths `/templates/...`, while frontend runs on Vite port 5174.
+- Fixed by resolving relative asset URLs against `VITE_API_BASE_URL` from `.env.local`.
+- Backend local API port confirmed from env as `8404`.
+- Archive must be recreated after manual overlay validation PASS.
+
+## Slice 03 — Manual Validation PASS
+
+- Manual browser check confirmed Guide overlay appears.
+- Manual browser check confirmed Template overlay appears.
+- Guide/Template toggle works.
+- Overlay asset URL resolution through `VITE_API_BASE_URL` works.
+- Slice 03 is ready for final archive and user-approved commit/push.

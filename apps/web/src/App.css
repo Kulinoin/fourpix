@@ -650,3 +650,168 @@ body::before {
     justify-self: start;
   }
 }
+
+/* Slice 03 — Overlay Engine */
+.camera-preview--with-overlay {
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+}
+
+.camera-preview--with-overlay .camera-video {
+  position: relative;
+  z-index: 1;
+}
+
+.camera-preview--with-overlay .camera-empty-state {
+  z-index: 4;
+}
+
+.camera-overlay {
+  pointer-events: none;
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: grid;
+  place-items: stretch;
+}
+
+.camera-overlay__image {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  user-select: none;
+}
+
+.camera-overlay__image--guide {
+  opacity: 0.92;
+  mix-blend-mode: screen;
+  filter: drop-shadow(0 0 8px rgba(0, 0, 0, 0.35));
+}
+
+.camera-overlay__image--template {
+  opacity: 0.58;
+  filter: drop-shadow(0 18px 45px rgba(0, 0, 0, 0.35));
+}
+
+.camera-overlay--empty {
+  place-items: end center;
+  padding: 18px;
+}
+
+.camera-overlay__empty-note {
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 999px;
+  padding: 8px 14px;
+  color: rgba(255, 255, 255, 0.84);
+  background: rgba(15, 23, 42, 0.68);
+  font-size: 0.82rem;
+  backdrop-filter: blur(12px);
+}
+
+.overlay-mode-toggle {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: calc(100% - 32px);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 999px;
+  padding: 8px;
+  color: #ffffff;
+  background: rgba(15, 23, 42, 0.7);
+  box-shadow: 0 18px 48px rgba(15, 23, 42, 0.28);
+  backdrop-filter: blur(16px);
+}
+
+.overlay-mode-toggle__label {
+  display: grid;
+  gap: 1px;
+  padding-left: 8px;
+  line-height: 1.1;
+}
+
+.overlay-mode-toggle__label span {
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.overlay-mode-toggle__label small {
+  color: rgba(255, 255, 255, 0.68);
+  font-size: 0.72rem;
+}
+
+.overlay-mode-toggle__buttons {
+  display: inline-flex;
+  gap: 6px;
+}
+
+.overlay-mode-toggle__button {
+  border: 0;
+  border-radius: 999px;
+  padding: 8px 12px;
+  color: rgba(255, 255, 255, 0.78);
+  background: rgba(255, 255, 255, 0.1);
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.overlay-mode-toggle__button:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.overlay-mode-toggle__button--active {
+  color: #261407;
+  background: linear-gradient(135deg, #facc15, #fb923c);
+}
+
+.overlay-mode-toggle__button:disabled {
+  cursor: not-allowed;
+  opacity: 0.56;
+}
+
+@media (max-width: 720px) {
+  .overlay-mode-toggle {
+    right: 12px;
+    left: 12px;
+    justify-content: space-between;
+    border-radius: 22px;
+  }
+
+  .overlay-mode-toggle__label small {
+    display: none;
+  }
+}
+
+.overlay-debug-box {
+  display: grid;
+  gap: 6px;
+  margin-top: 14px;
+  border: 1px dashed rgba(251, 146, 60, 0.45);
+  border-radius: 16px;
+  padding: 10px 12px;
+  background: rgba(251, 146, 60, 0.08);
+  font-size: 0.78rem;
+}
+
+.overlay-debug-box p {
+  margin: 0;
+  word-break: break-all;
+}
+
+.camera-preview--with-overlay {
+  min-height: 420px;
+  background: #0f172a;
+}
+
+.camera-preview--with-overlay .camera-video {
+  width: 100%;
+  height: 100%;
+  min-height: 420px;
+  object-fit: cover;
+}
