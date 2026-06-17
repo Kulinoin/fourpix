@@ -1,59 +1,87 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import './App.css'
-import { TemplateSelection } from './features/templates/TemplateSelection'
-import { API_BASE_URL, fetchTemplates, toApiAssetUrl } from './features/templates/templateApi'
-import type { TemplateSummary } from './types/template'
+import { CameraMode } from './features/camera/CameraMode'
+import type { TemplateSummary } from './types/templates'
 
-type HealthState = 'checking' | 'ok' | 'error'
+type ScreenMode = 'start' | 'templates' | 'camera'
+
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000').replace(/\/$/, '')
+
+const toAssetUrl = (url: string) => {
+  if (!url) {
+    return ''
+  }
+
+  if (/^https?:\/\//i.test(url)) {
+    return url
+  }
+
+  return `${API_BASE_URL}${url.startsWith('/') ? '' : '/'}${url}`
+}
 
 function App() {
-  const [healthState, setHealthState] = useState<HealthState>('checking')
+  const [screen, setScreen] = useState<ScreenMode>('start')
   const [templates, setTemplates] = useState<TemplateSummary[]>([])
-  const [templatesLoading, setTemplatesLoading] = useState(true)
+  const [selectedTemplate, setSelectedTemplate] = useState<TemplateSummary | null>(null)
+  const [isLoadingTemplates, setIsLoadingTemplates] = useState(false)
   const [templateError, setTemplateError] = useState<string | null>(null)
-  const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null)
-
-  const selectedTemplate = useMemo(
-    () => templates.find((template) => template.id === selectedTemplateId) ?? null,
-    [selectedTemplateId, templates],
-  )
-
-  const loadHealth = useCallback(async () => {
-    setHealthState('checking')
-
-    try {
-      const response = await fetch(`${API_BASE_URL}/health`)
-      setHealthState(response.ok ? 'ok' : 'error')
-    } catch {
-      setHealthState('error')
-    }
-  }, [])
-
-  const loadTemplates = useCallback(async () => {
-    setTemplatesLoading(true)
-    setTemplateError(null)
-
-    try {
-      const nextTemplates = await fetchTemplates()
-      setTemplates(nextTemplates)
-      setSelectedTemplateId((current) => {
-        if (current && nextTemplates.some((template) => template.id === current)) {
-          return current
-        }
-
-        return nextTemplates[0]?.id ?? null
-      })
-    } catch (error) {
-      setTemplateError(error instanceof Error ? error.message : 'Template registry gagal dimuat')
-    } finally {
-      setTemplatesLoading(false)
-    }
-  }, [])
 
   useEffect(() => {
-    void loadHealth()
+    let isMounted = true
+
+    const loadTemplates = async () => {
+      setIsLoadingTemplates(true)
+      setTemplateError(null)
+
+      try {
+        const response = await fetch(`${API_BASE_URL}/templates`)
+
+        if (!response.ok) {
+          throw new Error(`Template registry response ${response.status}`)
+        }
+
+        const data = (await response.json()) as TemplateSummary[]
+
+        if (!isMounted) {
+          return
+        }
+
+        setTemplates(data)
+        setSelectedTemplate((current) => current ?? data[0] ?? null)
+      } catch {
+        if (!isMounted) {
+          return
+        }
+
+        setTemplateError('Template registry belum bisa dibaca. Pastikan backend 4Pix aktif.')
+      } finally {
+        if (isMounted) {
+          setIsLoadingTemplates(false)
+        }
+      }
+    }
+
     void loadTemplates()
-  }, [loadHealth, loadTemplates])
+
+    return () => {
+      isMounted = false
+    }
+  }, [])
+
+  const canOpenCamera = useMemo(() => Boolean(selectedTemplate), [selectedTemplate])
+
+  if (screen === 'camera' && selectedTemplate) {
+    return (
+      <main className="app-shell">
+        <CameraMode
+          template={selectedTemplate}
+          onBack={() => {
+            setScreen('templates')
+          }}
+        />
+      </main>
+    )
+  }
 
   return (
     <main className="app-shell">
@@ -62,80 +90,129 @@ function App() {
           <p className="eyebrow">4Pix Studio</p>
           <h1>Bikin Pas Foto Lebih Apik</h1>
           <p className="hero-copy">
-            Slice 01 menyiapkan registry template berbasis folder dan metadata JSON. Template tidak di-hardcode di UI, jadi asset final nanti bisa diganti tanpa ubah logic utama.
+            Live camera preview dengan template-aware workflow. Slice 02 fokus
+            membuka kamera, memilih device, dan mengelola stream secara aman.
           </p>
         </div>
 
-        <div className="status-card">
-          <span className={`status-dot status-${healthState}`} />
-          <div>
-            <strong>Backend lokal</strong>
-            <span>
-              {healthState === 'checking'
-                ? 'Mengecek koneksi...'
-                : healthState === 'ok'
-                  ? 'Tersambung'
-                  : 'Belum tersambung'}
-            </span>
-          </div>
+        <div className="hero-badge">
+          <span>Local-first MVP</span>
+          <strong>fourpix</strong>
         </div>
       </section>
 
-      <TemplateSelection
-        templates={templates}
-        selectedTemplateId={selectedTemplateId}
-        isLoading={templatesLoading}
-        error={templateError}
-        onSelect={(template) => setSelectedTemplateId(template.id)}
-        onRetry={loadTemplates}
-      />
+      {screen === 'start' && (
+        <section className="mode-grid">
+          <button
+            className="mode-card mode-card--primary"
+            type="button"
+            onClick={() => {
+              setScreen('templates')
+            }}
+          >
+            <span>Mode utama</span>
+            <strong>Live Camera Mode</strong>
+            <small>Pilih template lalu buka liveview kamera.</small>
+          </button>
 
-      <section className="panel">
-        <p className="eyebrow">Template Terpilih</p>
+          <button className="mode-card" type="button" disabled>
+            <span>Mode alternatif</span>
+            <strong>Upload Photo Mode</strong>
+            <small>Disiapkan untuk Slice 04.</small>
+          </button>
+        </section>
+      )}
 
-        {selectedTemplate ? (
-          <div className="selected-template">
-            <img
-              src={toApiAssetUrl(selectedTemplate.overlayPreviewUrl)}
-              alt={`${selectedTemplate.name} overlay preview`}
-              className="selected-preview"
-            />
-
+      {screen === 'templates' && (
+        <section className="template-section">
+          <div className="section-heading">
             <div>
-              <h2>{selectedTemplate.name}</h2>
-              <p className="muted">ID: {selectedTemplate.id}</p>
-              <dl className="metadata-list">
-                <div>
-                  <dt>Canvas</dt>
-                  <dd>
-                    {selectedTemplate.canvas.width}×{selectedTemplate.canvas.height} ({selectedTemplate.canvas.ratio})
-                  </dd>
-                </div>
-                <div>
-                  <dt>Face center</dt>
-                  <dd>
-                    X {selectedTemplate.faceGuide.centerX}, Eye Y {selectedTemplate.faceGuide.eyeY}, Chin Y {selectedTemplate.faceGuide.chinY}
-                  </dd>
-                </div>
-                <div>
-                  <dt>Neck anchor</dt>
-                  <dd>
-                    X {selectedTemplate.neckAnchor.x}, Y {selectedTemplate.neckAnchor.y}
-                  </dd>
-                </div>
-                <div>
-                  <dt>Adjustment limit</dt>
-                  <dd>
-                    Scale {selectedTemplate.adjustmentLimits.minScale}–{selectedTemplate.adjustmentLimits.maxScale}, rotate {selectedTemplate.adjustmentLimits.minRotation}° sampai {selectedTemplate.adjustmentLimits.maxRotation}°
-                  </dd>
-                </div>
-              </dl>
+              <p className="eyebrow">Template Registry</p>
+              <h2>Pilih template untuk Live Camera</h2>
             </div>
+
+            <button
+              className="ghost-button"
+              type="button"
+              onClick={() => {
+                setScreen('start')
+              }}
+            >
+              ← Kembali
+            </button>
           </div>
-        ) : (
-          <p className="muted">Pilih salah satu template untuk melanjutkan ke slice kamera/overlay berikutnya.</p>
-        )}
-      </section>
+
+          {isLoadingTemplates && <p className="info-box">Memuat template...</p>}
+
+          {templateError && (
+            <div className="error-box" role="alert">
+              {templateError}
+            </div>
+          )}
+
+          {!isLoadingTemplates && !templateError && templates.length === 0 && (
+            <div className="error-box" role="alert">
+              Belum ada template valid dari backend.
+            </div>
+          )}
+
+          <div className="template-grid">
+            {templates.map((template) => {
+              const isSelected = selectedTemplate?.id === template.id
+
+              return (
+                <article
+                  className={`template-card ${isSelected ? 'template-card--selected' : ''}`}
+                  key={template.id}
+                >
+                  <div className="template-thumb-wrap">
+                    <img
+                      className="template-thumb"
+                      src={toAssetUrl(template.thumbnailUrl)}
+                      alt={template.name}
+                    />
+                  </div>
+
+                  <div className="template-meta">
+                    <p>{template.category}</p>
+                    <h3>{template.name}</h3>
+                    <code>{template.id}</code>
+                  </div>
+
+                  <button
+                    className={isSelected ? 'primary-button' : 'secondary-button'}
+                    type="button"
+                    onClick={() => {
+                      setSelectedTemplate(template)
+                      setScreen('camera')
+                    }}
+                  >
+                    {isSelected ? 'Buka Kamera' : 'Pilih & Buka Kamera'}
+                  </button>
+                </article>
+              )
+            })}
+          </div>
+
+          <div className="sticky-action">
+            <div>
+              <span>Template aktif</span>
+              <strong>{selectedTemplate?.name ?? 'Belum dipilih'}</strong>
+            </div>
+
+            <button
+              className="primary-button"
+              type="button"
+              disabled={!canOpenCamera}
+              onClick={() => {
+                setScreen('camera')
+              }}
+            >
+              Lanjut ke Live Camera
+            </button>
+          </div>
+        </section>
+      )}
     </main>
   )
 }
