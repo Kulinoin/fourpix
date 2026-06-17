@@ -1,0 +1,51 @@
+{
+  "schemaVersion": "1.0",
+  "id": "jas_hitam_tanpa_dasi_01",
+  "name": "Jas Hitam Tanpa Dasi",
+  "category": "male_formal",
+  "canvas": {
+    "width": 900,
+    "height": 1200,
+    "ratio": "3:4"
+  },
+  "assets": {
+    "thumbnail": "thumbnail.png",
+    "overlayGuide": "overlay-guide.png",
+    "overlayPreview": "overlay-preview.png",
+    "layerBack": "layer-back.png",
+    "layerFront": "layer-front.png"
+  },
+  "faceGuide": {
+    "centerX": 450,
+    "headTopY": 220,
+    "eyeY": 420,
+    "chinY": 610,
+    "safeHeadWidth": 360,
+    "safeHeadHeight": 470
+  },
+  "neckAnchor": {
+    "x": 450,
+    "y": 650
+  },
+  "shoulderGuide": {
+    "leftX": 220,
+    "rightX": 680,
+    "y": 760
+  },
+  "subjectInitialTransform": {
+    "x": 0,
+    "y": 0,
+    "scale": 1.0,
+    "rotation": 0
+  },
+  "adjustmentLimits": {
+    "minScale": 0.75,
+    "maxScale": 1.35,
+    "minRotation": -10,
+    "maxRotation": 10,
+    "maxTranslateX": 220,
+    "maxTranslateY": 260
+  },
+  "exportProfiles": ["3x4", "4x6"],
+  "notes": "Placeholder MVP. Asset final akan diganti tanpa mengubah logic registry."
+}

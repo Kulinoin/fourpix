@@ -34,3 +34,11 @@ Notes:
 - Frontend dev server berjalan di port lokal 5174.
 - Visual direction dibuat berbeda dari Gudange: lebih studio foto, teknologi, futuristik, slate/cyan.
 - Pytest PASS dengan 1 warning dependency test client dari FastAPI/Starlette. Warning ini tidak blocker untuk Slice 00.
+
+## Slice 01 — Template Registry
+
+- Added template registry from local template folders.
+- Added two placeholder MVP templates.
+- Added backend `/templates` endpoint.
+- Added frontend template selection and selected-template state.
+- Camera/overlay runtime remains non-scope for this slice.

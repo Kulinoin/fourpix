@@ -1,155 +1,140 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import './App.css'
+import { TemplateSelection } from './features/templates/TemplateSelection'
+import { API_BASE_URL, fetchTemplates, toApiAssetUrl } from './features/templates/templateApi'
+import type { TemplateSummary } from './types/template'
 
-type BackendStatus =
-  | {
-      state: 'checking'
-      message: string
-    }
-  | {
-      state: 'ok'
-      message: string
-      app: string
-      slug: string
-    }
-  | {
-      state: 'error'
-      message: string
-    }
-
-const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? 'http://127.0.0.1:8404'
+type HealthState = 'checking' | 'ok' | 'error'
 
 function App() {
-  const [backendStatus, setBackendStatus] = useState<BackendStatus>({
-    state: 'checking',
-    message: 'Mengecek koneksi backend lokal...',
-  })
+  const [healthState, setHealthState] = useState<HealthState>('checking')
+  const [templates, setTemplates] = useState<TemplateSummary[]>([])
+  const [templatesLoading, setTemplatesLoading] = useState(true)
+  const [templateError, setTemplateError] = useState<string | null>(null)
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null)
+
+  const selectedTemplate = useMemo(
+    () => templates.find((template) => template.id === selectedTemplateId) ?? null,
+    [selectedTemplateId, templates],
+  )
+
+  const loadHealth = useCallback(async () => {
+    setHealthState('checking')
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/health`)
+      setHealthState(response.ok ? 'ok' : 'error')
+    } catch {
+      setHealthState('error')
+    }
+  }, [])
+
+  const loadTemplates = useCallback(async () => {
+    setTemplatesLoading(true)
+    setTemplateError(null)
+
+    try {
+      const nextTemplates = await fetchTemplates()
+      setTemplates(nextTemplates)
+      setSelectedTemplateId((current) => {
+        if (current && nextTemplates.some((template) => template.id === current)) {
+          return current
+        }
+
+        return nextTemplates[0]?.id ?? null
+      })
+    } catch (error) {
+      setTemplateError(error instanceof Error ? error.message : 'Template registry gagal dimuat')
+    } finally {
+      setTemplatesLoading(false)
+    }
+  }, [])
 
   useEffect(() => {
-    const controller = new AbortController()
-
-    async function checkBackendHealth() {
-      try {
-        const response = await fetch(apiBaseUrl + '/health', {
-          signal: controller.signal,
-        })
-
-        if (!response.ok) {
-          throw new Error('Backend mengembalikan HTTP ' + response.status)
-        }
-
-        const data = (await response.json()) as {
-          status?: string
-          app?: string
-          slug?: string
-        }
-
-        if (data.status !== 'ok') {
-          throw new Error('Response health backend tidak valid.')
-        }
-
-        setBackendStatus({
-          state: 'ok',
-          message: 'Backend lokal terhubung.',
-          app: data.app ?? '4Pix Studio',
-          slug: data.slug ?? 'fourpix',
-        })
-      } catch (error) {
-        if (error instanceof DOMException && error.name === 'AbortError') {
-          return
-        }
-
-        setBackendStatus({
-          state: 'error',
-          message:
-            error instanceof Error
-              ? error.message
-              : 'Backend lokal belum dapat dihubungi.',
-        })
-      }
-    }
-
-    void checkBackendHealth()
-
-    return () => controller.abort()
-  }, [])
+    void loadHealth()
+    void loadTemplates()
+  }, [loadHealth, loadTemplates])
 
   return (
     <main className="app-shell">
-      <section className="hero-card">
-        <div className="hero-content">
-          <p className="eyebrow">Local Photo Studio</p>
-          <h1>4Pix Studio</h1>
-          <p className="tagline">Bikin Pas Foto Lebih Apik</p>
-          <p className="intro">
-            Fondasi awal aplikasi pas foto lokal berbasis live camera,
-            overlay guide, template compositing, dan export cepat.
+      <section className="hero">
+        <div>
+          <p className="eyebrow">4Pix Studio</p>
+          <h1>Bikin Pas Foto Lebih Apik</h1>
+          <p className="hero-copy">
+            Slice 01 menyiapkan registry template berbasis folder dan metadata JSON. Template tidak di-hardcode di UI, jadi asset final nanti bisa diganti tanpa ubah logic utama.
           </p>
-
-          <div className="status-card" data-state={backendStatus.state}>
-            <span className="status-dot" />
-            <div>
-              <strong>
-                {backendStatus.state === 'ok'
-                  ? 'Backend OK'
-                  : backendStatus.state === 'checking'
-                    ? 'Checking Backend'
-                    : 'Backend Error'}
-              </strong>
-              <p>{backendStatus.message}</p>
-
-              {backendStatus.state === 'ok' ? (
-                <small>
-                  App: {backendStatus.app} · Slug: {backendStatus.slug}
-                </small>
-              ) : null}
-            </div>
-          </div>
-
-          <div className="foundation-note">
-            <h2>Slice 00 — Project Foundation</h2>
-            <p>
-              Frontend React/Vite dan backend FastAPI sudah siap. Fitur kamera,
-              template registry, remove background, compositing, adjustment, dan
-              export akan dibangun pada slice berikutnya.
-            </p>
-          </div>
         </div>
 
-        <aside className="studio-panel" aria-label="4Pix Studio preview">
-          <div className="camera-shell">
-            <div className="camera-topbar">
-              <span />
-              <span />
-              <span />
-            </div>
+        <div className="status-card">
+          <span className={`status-dot status-${healthState}`} />
+          <div>
+            <strong>Backend lokal</strong>
+            <span>
+              {healthState === 'checking'
+                ? 'Mengecek koneksi...'
+                : healthState === 'ok'
+                  ? 'Tersambung'
+                  : 'Belum tersambung'}
+            </span>
+          </div>
+        </div>
+      </section>
 
-            <div className="camera-frame">
-              <div className="scan-line" />
-              <div className="face-guide">
-                <span className="guide-head" />
-                <span className="guide-eye" />
-                <span className="guide-chin" />
-                <span className="guide-shoulder" />
-              </div>
-              <div className="focus-corner corner-a" />
-              <div className="focus-corner corner-b" />
-              <div className="focus-corner corner-c" />
-              <div className="focus-corner corner-d" />
-            </div>
+      <TemplateSelection
+        templates={templates}
+        selectedTemplateId={selectedTemplateId}
+        isLoading={templatesLoading}
+        error={templateError}
+        onSelect={(template) => setSelectedTemplateId(template.id)}
+        onRetry={loadTemplates}
+      />
 
-            <div className="studio-meta">
-              <span>Camera-ready foundation</span>
-              <strong>Local-first</strong>
+      <section className="panel">
+        <p className="eyebrow">Template Terpilih</p>
+
+        {selectedTemplate ? (
+          <div className="selected-template">
+            <img
+              src={toApiAssetUrl(selectedTemplate.overlayPreviewUrl)}
+              alt={`${selectedTemplate.name} overlay preview`}
+              className="selected-preview"
+            />
+
+            <div>
+              <h2>{selectedTemplate.name}</h2>
+              <p className="muted">ID: {selectedTemplate.id}</p>
+              <dl className="metadata-list">
+                <div>
+                  <dt>Canvas</dt>
+                  <dd>
+                    {selectedTemplate.canvas.width}×{selectedTemplate.canvas.height} ({selectedTemplate.canvas.ratio})
+                  </dd>
+                </div>
+                <div>
+                  <dt>Face center</dt>
+                  <dd>
+                    X {selectedTemplate.faceGuide.centerX}, Eye Y {selectedTemplate.faceGuide.eyeY}, Chin Y {selectedTemplate.faceGuide.chinY}
+                  </dd>
+                </div>
+                <div>
+                  <dt>Neck anchor</dt>
+                  <dd>
+                    X {selectedTemplate.neckAnchor.x}, Y {selectedTemplate.neckAnchor.y}
+                  </dd>
+                </div>
+                <div>
+                  <dt>Adjustment limit</dt>
+                  <dd>
+                    Scale {selectedTemplate.adjustmentLimits.minScale}–{selectedTemplate.adjustmentLimits.maxScale}, rotate {selectedTemplate.adjustmentLimits.minRotation}° sampai {selectedTemplate.adjustmentLimits.maxRotation}°
+                  </dd>
+                </div>
+              </dl>
             </div>
           </div>
-
-          <div className="feature-pills">
-            <span>Live Camera</span>
-            <span>Overlay Guide</span>
-            <span>Local API</span>
-          </div>
-        </aside>
+        ) : (
+          <p className="muted">Pilih salah satu template untuk melanjutkan ke slice kamera/overlay berikutnya.</p>
+        )}
       </section>
     </main>
   )

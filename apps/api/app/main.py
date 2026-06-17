@@ -32,3 +32,9 @@ def health() -> dict[str, str]:
         "slug": APP_SLUG,
         "service": "api",
     }
+
+# Slice 01: Template Registry
+from app.routes.templates import router as templates_router
+
+app.include_router(templates_router)
+
