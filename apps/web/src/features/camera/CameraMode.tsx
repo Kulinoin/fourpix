@@ -16,6 +16,7 @@ import { PhotoInputPreview } from "../capture/PhotoInputPreview";
 import { removeBackground } from "../../lib/backgroundRemovalApi";
 import { composeTemplate, type ComposeTransform } from "../../lib/compositingApi";
 import "./CameraMode.css";
+import { ExportControls } from '../export/ExportControls'
 
 const API_BASE_URL =
   (import.meta.env.VITE_API_BASE_URL as string | undefined) ??
@@ -894,7 +895,9 @@ export function CameraMode({
           </p>
         </article>
       </section>
-    </main>
+    
+      <ExportControls imageUrl={compositePreviewUrl} disabled={!compositePreviewUrl} />
+</main>
   );
 }
 

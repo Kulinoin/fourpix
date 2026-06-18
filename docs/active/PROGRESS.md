@@ -195,3 +195,16 @@ Tanggal: 18 Juni 2026
 ### Validasi
 - Automated validation PASS: frontend lint/build dan backend pytest.
 - Manual browser validation PASS: X/Y, scale/zoom, rotate ringan, reset, dan preview compositing berubah sesuai adjustment.
+
+## Slice 08 — Export JPG/PNG
+
+Status: implemented pending validation.
+
+Catatan:
+- Menambahkan endpoint backend `/export/profiles` dan `/export`.
+- Menambahkan service export berbasis Pillow untuk JPG/PNG.
+- Menambahkan profile export MVP `3x4` dan `4x6`.
+- Menambahkan frontend export control untuk download JPG/PNG dari preview final compositing.
+- Menambahkan automated tests untuk export service dan route.
+- Commit/push belum dilakukan sampai validasi PASS dan user menyetujui.
+
