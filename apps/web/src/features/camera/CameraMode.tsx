@@ -1,11 +1,4 @@
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type ChangeEvent,
-} from "react";
+import { type ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   captureVideoFrame,
   createPhotoInputFromFile,
@@ -13,6 +6,7 @@ import {
   type PhotoInput,
 } from "../capture/captureImage";
 import { PhotoInputPreview } from "../capture/PhotoInputPreview";
+import { removeBackground } from "../../lib/backgroundRemovalApi";
 
 const API_BASE_URL =
   (import.meta.env.VITE_API_BASE_URL as string | undefined) ??
@@ -124,6 +118,103 @@ function getOverlayAssetSource(
     template.assets?.overlayPreviewUrl ??
     template.assets?.overlayPreview ??
     null
+  );
+}
+
+
+function FourpixSlice05Panel() {
+  const [sourceBlob, setSourceBlob] = useState<Blob | null>(null);
+  const [sourceUrl, setSourceUrl] = useState<string | null>(null);
+  const [resultUrl, setResultUrl] = useState<string | null>(null);
+  const [error, setError] = useState("");
+  const [isProcessing, setIsProcessing] = useState(false);
+
+  useEffect(() => {
+    return () => {
+      if (sourceUrl) URL.revokeObjectURL(sourceUrl);
+      if (resultUrl) URL.revokeObjectURL(resultUrl);
+    };
+  }, [sourceUrl, resultUrl]);
+
+  const onUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0] ?? null;
+    event.target.value = "";
+
+    if (!file) return;
+
+    const isValidImage =
+      ["image/jpeg", "image/png"].includes(file.type) || /\.(jpe?g|png)$/i.test(file.name);
+
+    if (!isValidImage) {
+      setError("File tidak valid. Gunakan JPG atau PNG.");
+      return;
+    }
+
+    if (file.size > 12 * 1024 * 1024) {
+      setError("Ukuran file terlalu besar. Maksimal 12 MB untuk MVP.");
+      return;
+    }
+
+    if (sourceUrl) URL.revokeObjectURL(sourceUrl);
+    if (resultUrl) URL.revokeObjectURL(resultUrl);
+
+    setSourceBlob(file);
+    setSourceUrl(URL.createObjectURL(file));
+    setResultUrl(null);
+    setError("");
+  };
+
+  const onProcess = async () => {
+    if (!sourceBlob) {
+      setError("Upload foto dulu sebelum remove background.");
+      return;
+    }
+
+    setIsProcessing(true);
+    setError("");
+
+    try {
+      const outputBlob = await removeBackground(sourceBlob, "fourpix-upload.png");
+      if (resultUrl) URL.revokeObjectURL(resultUrl);
+      setResultUrl(URL.createObjectURL(outputBlob));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Remove background gagal.");
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  return (
+    <section className="fourpix-slice05-panel">
+      <div className="fourpix-slice05-note">
+        Standar capture disarankan: background putih atau terang bersih, pencahayaan rata, dan hindari backlight.
+      </div>
+
+      <div className="fourpix-slice05-actions">
+        <label className="fourpix-slice05-upload">
+          Upload JPG/PNG
+          <input type="file" accept="image/png,image/jpeg" onChange={onUpload} />
+        </label>
+
+        <button type="button" onClick={onProcess} disabled={!sourceBlob || isProcessing}>
+          {isProcessing ? "Memproses lokal..." : "Remove Background Lokal"}
+        </button>
+      </div>
+
+      {error ? <p className="fourpix-slice05-error">{error}</p> : null}
+
+      <div className="fourpix-slice05-preview-grid">
+        <div className="fourpix-slice05-preview">
+          <strong>Input</strong>
+          {sourceUrl ? <img src={sourceUrl} alt="Input foto" /> : <span>Belum ada foto</span>}
+        </div>
+
+        <div className="fourpix-slice05-preview fourpix-slice05-transparent">
+          <strong>PNG Transparan</strong>
+          {resultUrl ? <img src={resultUrl} alt="Hasil remove background" /> : <span>Belum diproses</span>}
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -565,7 +656,8 @@ export function CameraMode({
             </span>
           </div>
         </aside>
-      </section>
+            <FourpixSlice05Panel />
+</section>
     </main>
   );
 }

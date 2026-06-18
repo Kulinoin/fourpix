@@ -1,3 +1,4 @@
+from app.routes import process
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -38,3 +39,4 @@ from app.routes.templates import router as templates_router
 
 app.include_router(templates_router)
 
+app.include_router(process.router)

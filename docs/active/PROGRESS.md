@@ -144,3 +144,13 @@ Validation:
 
 Archive:
 - `archives/2026-06-18_185816_slice-04_capture-upload-photo.zip`
+
+## Slice 05 — Local Background Removal
+
+- Added local background removal endpoint POST /process/remove-background.
+- Added rembg[cpu] dependency path for local ONNX Runtime CPU processing.
+- Added JPG/PNG validation and max upload size guard.
+- Added frontend upload processing UI with input preview and transparent PNG preview.
+- Added capture guideline: background putih/terang bersih and pencahayaan rata for more stable local AI result.
+- Confirmed this slice does not implement compositing, manual adjustment, export, or model training.
+- Archive must be created after validation PASS before commit/push.
