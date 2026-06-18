@@ -1,4 +1,11 @@
-import { type ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  type ChangeEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   captureVideoFrame,
   createPhotoInputFromFile,
@@ -7,12 +14,22 @@ import {
 } from "../capture/captureImage";
 import { PhotoInputPreview } from "../capture/PhotoInputPreview";
 import { removeBackground } from "../../lib/backgroundRemovalApi";
+import { composeTemplate, type ComposeTransform } from "../../lib/compositingApi";
+import "./CameraMode.css";
 
 const API_BASE_URL =
-
   (import.meta.env.VITE_API_BASE_URL as string | undefined) ??
   (import.meta.env.VITE_API_URL as string | undefined) ??
   "http://127.0.0.1:8404";
+
+type AdjustmentLimits = {
+  minScale: number;
+  maxScale: number;
+  minRotation: number;
+  maxRotation: number;
+  maxTranslateX: number;
+  maxTranslateY: number;
+};
 
 type CameraTemplate = {
   id: string;
@@ -27,6 +44,7 @@ type CameraTemplate = {
     overlayGuideUrl?: string;
     overlayPreviewUrl?: string;
   };
+  adjustmentLimits?: Partial<AdjustmentLimits>;
 };
 
 type OverlayMode = "guide" | "template" | "none";
@@ -42,6 +60,29 @@ type CameraModeProps = {
   onPhotoReady?: (photoInput: PhotoInput) => void;
   onPhotoInputReady?: (photoInput: PhotoInput) => void;
 };
+
+const DEFAULT_ADJUSTMENT: ComposeTransform = {
+  x: 0,
+  y: 0,
+  scale: 1,
+  rotation: 0,
+};
+
+const DEFAULT_ADJUSTMENT_LIMITS: AdjustmentLimits = {
+  minScale: 0.75,
+  maxScale: 1.35,
+  minRotation: -10,
+  maxRotation: 10,
+  maxTranslateX: 220,
+  maxTranslateY: 260,
+};
+
+const BACKGROUND_PRESETS = [
+  { label: "Merah", value: "#E53935" },
+  { label: "Biru", value: "#1E40AF" },
+  { label: "Putih", value: "#FFFFFF" },
+  { label: "Abu", value: "#E5E7EB" },
+];
 
 function getErrorMessage(error: unknown): string {
   if (error instanceof Error) return error.message;
@@ -122,101 +163,38 @@ function getOverlayAssetSource(
   );
 }
 
+function finiteOr(value: unknown, fallback: number): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
 
-function FourpixSlice05Panel() {
-  const [sourceBlob, setSourceBlob] = useState<Blob | null>(null);
-  const [sourceUrl, setSourceUrl] = useState<string | null>(null);
-  const [resultUrl, setResultUrl] = useState<string | null>(null);
-  const [error, setError] = useState("");
-  const [isProcessing, setIsProcessing] = useState(false);
+function getAdjustmentLimits(template: CameraTemplate | null): AdjustmentLimits {
+  const limits = template?.adjustmentLimits ?? {};
 
-  useEffect(() => {
-    return () => {
-      if (sourceUrl) URL.revokeObjectURL(sourceUrl);
-      if (resultUrl) URL.revokeObjectURL(resultUrl);
-    };
-  }, [sourceUrl, resultUrl]);
-
-  const onUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0] ?? null;
-    event.target.value = "";
-
-    if (!file) return;
-
-    const isValidImage =
-      ["image/jpeg", "image/png"].includes(file.type) || /\.(jpe?g|png)$/i.test(file.name);
-
-    if (!isValidImage) {
-      setError("File tidak valid. Gunakan JPG atau PNG.");
-      return;
-    }
-
-    if (file.size > 12 * 1024 * 1024) {
-      setError("Ukuran file terlalu besar. Maksimal 12 MB untuk MVP.");
-      return;
-    }
-
-    if (sourceUrl) URL.revokeObjectURL(sourceUrl);
-    if (resultUrl) URL.revokeObjectURL(resultUrl);
-
-    setSourceBlob(file);
-    setSourceUrl(URL.createObjectURL(file));
-    setResultUrl(null);
-    setError("");
+  return {
+    minScale: finiteOr(limits.minScale, DEFAULT_ADJUSTMENT_LIMITS.minScale),
+    maxScale: finiteOr(limits.maxScale, DEFAULT_ADJUSTMENT_LIMITS.maxScale),
+    minRotation: finiteOr(limits.minRotation, DEFAULT_ADJUSTMENT_LIMITS.minRotation),
+    maxRotation: finiteOr(limits.maxRotation, DEFAULT_ADJUSTMENT_LIMITS.maxRotation),
+    maxTranslateX: Math.abs(
+      finiteOr(limits.maxTranslateX, DEFAULT_ADJUSTMENT_LIMITS.maxTranslateX),
+    ),
+    maxTranslateY: Math.abs(
+      finiteOr(limits.maxTranslateY, DEFAULT_ADJUSTMENT_LIMITS.maxTranslateY),
+    ),
   };
+}
 
-  const onProcess = async () => {
-    if (!sourceBlob) {
-      setError("Upload foto dulu sebelum remove background.");
-      return;
-    }
+function clamp(value: number, minimum: number, maximum: number): number {
+  return Math.min(maximum, Math.max(minimum, value));
+}
 
-    setIsProcessing(true);
-    setError("");
-
-    try {
-      const outputBlob = await removeBackground(sourceBlob, "fourpix-upload.png");
-      if (resultUrl) URL.revokeObjectURL(resultUrl);
-      setResultUrl(URL.createObjectURL(outputBlob));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Remove background gagal.");
-    } finally {
-      setIsProcessing(false);
-    }
+function clampTransform(transform: ComposeTransform, limits: AdjustmentLimits): ComposeTransform {
+  return {
+    x: clamp(transform.x, -limits.maxTranslateX, limits.maxTranslateX),
+    y: clamp(transform.y, -limits.maxTranslateY, limits.maxTranslateY),
+    scale: clamp(transform.scale, limits.minScale, limits.maxScale),
+    rotation: clamp(transform.rotation, limits.minRotation, limits.maxRotation),
   };
-
-  return (
-    <section className="fourpix-slice05-panel">
-      <div className="fourpix-slice05-note">
-        Standar capture disarankan: background putih atau terang bersih, pencahayaan rata, dan hindari backlight.
-      </div>
-
-      <div className="fourpix-slice05-actions">
-        <label className="fourpix-slice05-upload">
-          Upload JPG/PNG
-          <input type="file" accept="image/png,image/jpeg" onChange={onUpload} />
-        </label>
-
-        <button type="button" onClick={onProcess} disabled={!sourceBlob || isProcessing}>
-          {isProcessing ? "Memproses lokal..." : "Remove Background Lokal"}
-        </button>
-      </div>
-
-      {error ? <p className="fourpix-slice05-error">{error}</p> : null}
-
-      <div className="fourpix-slice05-preview-grid">
-        <div className="fourpix-slice05-preview">
-          <strong>Input</strong>
-          {sourceUrl ? <img src={sourceUrl} alt="Input foto" /> : <span>Belum ada foto</span>}
-        </div>
-
-        <div className="fourpix-slice05-preview fourpix-slice05-transparent">
-          <strong>PNG Transparan</strong>
-          {resultUrl ? <img src={resultUrl} alt="Hasil remove background" /> : <span>Belum diproses</span>}
-        </div>
-      </div>
-    </section>
-  );
 }
 
 export function CameraMode({
@@ -240,10 +218,20 @@ export function CameraMode({
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [overlayMode, setOverlayMode] = useState<OverlayMode>("guide");
   const [overlayAssetError, setOverlayAssetError] = useState<string | null>(null);
+
   const [photoInput, setPhotoInput] = useState<PhotoInput | null>(null);
   const [inputError, setInputError] = useState<string | null>(null);
   const [isCapturing, setIsCapturing] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
+
+  const [backgroundColor, setBackgroundColor] = useState("#E53935");
+  const [adjustment, setAdjustment] = useState<ComposeTransform>(DEFAULT_ADJUSTMENT);
+  const [removedSubjectBlob, setRemovedSubjectBlob] = useState<Blob | null>(null);
+  const [removedSubjectUrl, setRemovedSubjectUrl] = useState<string | null>(null);
+  const [compositePreviewUrl, setCompositePreviewUrl] = useState<string | null>(null);
+  const [processingError, setProcessingError] = useState<string | null>(null);
+  const [isRemovingBackground, setIsRemovingBackground] = useState(false);
+  const [isComposing, setIsComposing] = useState(false);
 
   const activeTemplate = useMemo(
     () => selectedTemplate ?? template ?? null,
@@ -252,12 +240,17 @@ export function CameraMode({
 
   const handleBack = onBack ?? onBackToTemplates ?? onBackToTemplateSelect ?? onBackToHome;
 
+  const adjustmentLimits = useMemo(
+    () => getAdjustmentLimits(activeTemplate),
+    [activeTemplate],
+  );
+
   const overlayAssetSource = getOverlayAssetSource(activeTemplate, overlayMode);
   const overlayImageUrl = resolveTemplateAssetUrl(activeTemplate, overlayAssetSource ?? undefined);
   const shouldShowGeneratedGuide =
     overlayMode === "guide" && (!overlayImageUrl || Boolean(overlayAssetError));
-
   const canCapture = cameraStatus === "active" && !isCapturing;
+  const canProcess = Boolean(photoInput && activeTemplate?.id) && !isRemovingBackground;
 
   const emitPhotoInput = useCallback(
     (nextPhotoInput: PhotoInput) => {
@@ -266,6 +259,13 @@ export function CameraMode({
     },
     [onPhotoInputReady, onPhotoReady],
   );
+
+  const clearProcessingOutputs = useCallback(() => {
+    setRemovedSubjectBlob(null);
+    setRemovedSubjectUrl(null);
+    setCompositePreviewUrl(null);
+    setProcessingError(null);
+  }, []);
 
   const replacePhotoInput = useCallback(
     (nextPhotoInput: PhotoInput | null) => {
@@ -278,12 +278,14 @@ export function CameraMode({
 
       currentPhotoInputRef.current = nextPhotoInput;
       setPhotoInput(nextPhotoInput);
+      clearProcessingOutputs();
+      setAdjustment(DEFAULT_ADJUSTMENT);
 
       if (nextPhotoInput) {
         emitPhotoInput(nextPhotoInput);
       }
     },
-    [emitPhotoInput],
+    [clearProcessingOutputs, emitPhotoInput],
   );
 
   const stopActiveStream = useCallback(() => {
@@ -307,16 +309,11 @@ export function CameraMode({
     }
 
     const mediaDevices = await navigator.mediaDevices.enumerateDevices();
-    const videoDevices = mediaDevices.filter(
-      (device) => device.kind === "videoinput",
-    );
-
+    const videoDevices = mediaDevices.filter((device) => device.kind === "videoinput");
     setDevices(videoDevices);
 
     if (!selectedDeviceId) {
-      const firstDeviceId = videoDevices.find((device) => device.deviceId)
-        ?.deviceId;
-
+      const firstDeviceId = videoDevices.find((device) => device.deviceId)?.deviceId;
       if (firstDeviceId) {
         setSelectedDeviceId(firstDeviceId);
       }
@@ -364,9 +361,7 @@ export function CameraMode({
           await videoRef.current.play();
         }
 
-        const activeDeviceId =
-          stream.getVideoTracks()[0]?.getSettings().deviceId ?? "";
-
+        const activeDeviceId = stream.getVideoTracks()[0]?.getSettings().deviceId ?? "";
         if (activeDeviceId && !selectedDeviceId) {
           setSelectedDeviceId(activeDeviceId);
         }
@@ -395,10 +390,85 @@ export function CameraMode({
   }, [activeTemplate?.id, overlayMode, overlayImageUrl]);
 
   useEffect(() => {
+    setAdjustment((current) => clampTransform(current, adjustmentLimits));
+  }, [
+    adjustmentLimits.maxRotation,
+    adjustmentLimits.maxScale,
+    adjustmentLimits.maxTranslateX,
+    adjustmentLimits.maxTranslateY,
+    adjustmentLimits.minRotation,
+    adjustmentLimits.minScale,
+  ]);
+
+  useEffect(() => {
     return () => {
       revokePhotoInput(currentPhotoInputRef.current);
     };
   }, []);
+
+  useEffect(() => {
+    return () => {
+      if (removedSubjectUrl) {
+        URL.revokeObjectURL(removedSubjectUrl);
+      }
+    };
+  }, [removedSubjectUrl]);
+
+  useEffect(() => {
+    return () => {
+      if (compositePreviewUrl) {
+        URL.revokeObjectURL(compositePreviewUrl);
+      }
+    };
+  }, [compositePreviewUrl]);
+
+  useEffect(() => {
+    if (!removedSubjectBlob || !activeTemplate?.id) {
+      return;
+    }
+
+    let cancelled = false;
+
+    const timer = window.setTimeout(async () => {
+      setIsComposing(true);
+      setProcessingError(null);
+
+      try {
+        const outputBlob = await composeTemplate({
+          subjectBlob: removedSubjectBlob,
+          templateId: activeTemplate.id,
+          backgroundColor,
+          transform: adjustment,
+        });
+
+        if (!cancelled) {
+          setCompositePreviewUrl(URL.createObjectURL(outputBlob));
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setProcessingError(getErrorMessage(error));
+          setCompositePreviewUrl(null);
+        }
+      } finally {
+        if (!cancelled) {
+          setIsComposing(false);
+        }
+      }
+    }, 280);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [
+    activeTemplate?.id,
+    adjustment.rotation,
+    adjustment.scale,
+    adjustment.x,
+    adjustment.y,
+    backgroundColor,
+    removedSubjectBlob,
+  ]);
 
   const handleCapture = useCallback(async () => {
     if (!videoRef.current) {
@@ -413,7 +483,6 @@ export function CameraMode({
       const nextPhotoInput = await captureVideoFrame(videoRef.current, {
         mimeType: "image/png",
       });
-
       replacePhotoInput(nextPhotoInput);
     } catch (error) {
       setInputError(getErrorMessage(error));
@@ -444,44 +513,91 @@ export function CameraMode({
     [replacePhotoInput],
   );
 
+  const handleProcessPhoto = useCallback(async () => {
+    if (!photoInput) {
+      setProcessingError("Ambil foto atau upload JPG/PNG dulu sebelum compositing.");
+      return;
+    }
+
+    if (!activeTemplate?.id) {
+      setProcessingError("Template belum dipilih.");
+      return;
+    }
+
+    setIsRemovingBackground(true);
+    setProcessingError(null);
+    setCompositePreviewUrl(null);
+
+    try {
+      const outputBlob = await removeBackground(photoInput.blob, photoInput.fileName);
+      setRemovedSubjectBlob(outputBlob);
+      setRemovedSubjectUrl(URL.createObjectURL(outputBlob));
+    } catch (error) {
+      setRemovedSubjectBlob(null);
+      setRemovedSubjectUrl(null);
+      setCompositePreviewUrl(null);
+      setProcessingError(getErrorMessage(error));
+    } finally {
+      setIsRemovingBackground(false);
+    }
+  }, [activeTemplate?.id, photoInput]);
+
+  const handleAdjustmentChange = useCallback(
+    (key: keyof ComposeTransform, value: number) => {
+      setAdjustment((current) =>
+        clampTransform(
+          {
+            ...current,
+            [key]: value,
+          },
+          adjustmentLimits,
+        ),
+      );
+    },
+    [adjustmentLimits],
+  );
+
+  const resetAdjustment = useCallback(() => {
+    setAdjustment(DEFAULT_ADJUSTMENT);
+  }, []);
+
   return (
-    <main className="slice04-camera">
-      <header className="slice04-topbar">
-        <div className="slice04-titleblock">
-          <span className="slice04-kicker">4Pix Studio</span>
-          <h1>Capture & Upload Photo</h1>
+    <main className="fourpix-camera-shell">
+      <section className="fourpix-camera-header">
+        <div>
+          <p className="fourpix-kicker">4Pix Studio</p>
+          <h1>Manual Adjustment Preview</h1>
           <p>
-            Ambil foto dari live camera atau upload JPG/PNG sebagai input awal
-            sebelum remove background.
+            Ambil atau upload foto, remove background lokal, lalu geser X/Y, zoom, rotate ringan,
+            dan lihat preview compositing berubah otomatis.
           </p>
         </div>
 
-        <div className="slice04-topbar-actions">
+        <div className="fourpix-header-actions">
           {activeTemplate ? (
-            <span className="slice04-template-pill">{activeTemplate.name}</span>
+            <span className="fourpix-template-pill">{activeTemplate.name}</span>
           ) : (
-            <span className="slice04-template-pill slice04-template-pill-muted">
+            <span className="fourpix-template-pill fourpix-template-pill-muted">
               Template belum dipilih
             </span>
           )}
 
           {handleBack ? (
-            <button type="button" className="slice04-secondary-button" onClick={handleBack}>
+            <button type="button" className="fourpix-secondary-button" onClick={handleBack}>
               Kembali
             </button>
           ) : null}
         </div>
-      </header>
+      </section>
 
-      <section className="slice04-layout">
-        <div className="slice04-live-card">
-          <div className="slice04-live-header">
+      <section className="fourpix-camera-grid">
+        <article className="fourpix-card fourpix-live-card">
+          <div className="fourpix-card-heading">
             <div>
-              <span className="slice04-kicker">Live Camera</span>
+              <p className="fourpix-section-label">Live Camera</p>
               <h2>Posisikan wajah sesuai overlay</h2>
             </div>
-
-            <span className={`slice04-live-status slice04-live-status-${cameraStatus}`}>
+            <span className={`fourpix-status-pill fourpix-status-${cameraStatus}`}>
               {cameraStatus === "active"
                 ? "Kamera aktif"
                 : cameraStatus === "starting"
@@ -492,17 +608,11 @@ export function CameraMode({
             </span>
           </div>
 
-          <div className="slice04-stage">
-            <video
-              ref={videoRef}
-              className="slice04-video"
-              autoPlay
-              muted
-              playsInline
-            />
+          <div className="fourpix-live-frame">
+            <video ref={videoRef} className="fourpix-live-video" playsInline muted />
 
             {cameraStatus !== "active" ? (
-              <div className="slice04-stage-placeholder">
+              <div className="fourpix-live-placeholder">
                 {cameraStatus === "starting"
                   ? "Menyiapkan liveview kamera..."
                   : "Liveview belum aktif"}
@@ -511,14 +621,13 @@ export function CameraMode({
 
             {overlayMode !== "none" && overlayImageUrl && !overlayAssetError ? (
               <img
-                className="slice04-overlay-image"
+                className="fourpix-overlay-image"
                 src={overlayImageUrl}
                 alt={
                   overlayMode === "guide"
-                    ? "Overlay guide pas foto"
-                    : "Overlay preview template"
+                    ? "Overlay guide posisi wajah"
+                    : "Overlay template transparan"
                 }
-                draggable={false}
                 onError={() => {
                   setOverlayAssetError(
                     overlayMode === "guide"
@@ -530,56 +639,44 @@ export function CameraMode({
             ) : null}
 
             {shouldShowGeneratedGuide ? (
-              <div className="slice04-generated-guide" aria-hidden="true">
-                <span className="slice04-guide-line slice04-guide-line-vertical" />
-                <span className="slice04-guide-oval" />
-                <span className="slice04-guide-line slice04-guide-line-eye" />
-                <span className="slice04-guide-line slice04-guide-line-chin" />
-                <span className="slice04-guide-line slice04-guide-line-shoulder" />
+              <div className="fourpix-generated-guide" aria-hidden="true">
+                <span className="fourpix-guide-center" />
+                <span className="fourpix-guide-head" />
+                <span className="fourpix-guide-eyes" />
+                <span className="fourpix-guide-chin" />
+                <span className="fourpix-guide-shoulder" />
               </div>
             ) : null}
 
             {overlayMode === "template" && overlayAssetError ? (
-              <div className="slice04-overlay-warning">
-                {overlayAssetError}
-              </div>
+              <div className="fourpix-overlay-warning">{overlayAssetError}</div>
             ) : null}
           </div>
 
-          {cameraError ? (
-            <div className="slice04-error-box">{cameraError}</div>
-          ) : null}
-
+          {cameraError ? <p className="fourpix-error">{cameraError}</p> : null}
           {overlayMode === "guide" && overlayAssetError ? (
-            <div className="slice04-info-box">{overlayAssetError}</div>
+            <p className="fourpix-info">{overlayAssetError}</p>
           ) : null}
 
-          <div className="slice04-controls">
-            <button
-              type="button"
-              className="slice04-primary-button"
-              disabled={!canCapture}
-              onClick={() => void handleCapture()}
-            >
+          <div className="fourpix-action-row">
+            <button type="button" disabled={!canCapture} onClick={() => void handleCapture()}>
               {isCapturing ? "Mengambil foto..." : "Capture Foto"}
             </button>
-
             <button
               type="button"
-              className="slice04-secondary-button"
+              className="fourpix-secondary-button"
               onClick={() => void startCamera(selectedDeviceId || undefined)}
             >
               Restart Kamera
             </button>
-
-            <button type="button" className="slice04-secondary-button" onClick={stopCamera}>
+            <button type="button" className="fourpix-secondary-button" onClick={stopCamera}>
               Stop Kamera
             </button>
           </div>
 
-          <div className="slice04-field-grid">
-            <label className="slice04-field">
-              <span>Kamera</span>
+          <div className="fourpix-control-grid">
+            <label>
+              Kamera
               <select
                 value={selectedDeviceId}
                 onChange={(event) => setSelectedDeviceId(event.target.value)}
@@ -588,10 +685,7 @@ export function CameraMode({
                   <option value="">Default browser camera</option>
                 ) : (
                   devices.map((device, index) => (
-                    <option
-                      key={device.deviceId || `camera-${index}`}
-                      value={device.deviceId}
-                    >
+                    <option key={device.deviceId || index} value={device.deviceId}>
                       {device.label || `Kamera ${index + 1}`}
                     </option>
                   ))
@@ -599,8 +693,8 @@ export function CameraMode({
               </select>
             </label>
 
-            <label className="slice04-field">
-              <span>Overlay</span>
+            <label>
+              Overlay
               <select
                 value={overlayMode}
                 onChange={(event) => setOverlayMode(event.target.value as OverlayMode)}
@@ -611,54 +705,195 @@ export function CameraMode({
               </select>
             </label>
           </div>
-        </div>
+        </article>
 
-        <aside className="slice04-input-panel">
-          <div className="slice04-upload-card">
-            <span className="slice04-kicker">Upload Photo Mode</span>
-            <h2>Upload foto alternatif</h2>
-            <p>
-              Gunakan mode ini kalau kamera belum tersedia atau pelanggan sudah
-              membawa file foto.
-            </p>
+        <article className="fourpix-card">
+          <div className="fourpix-card-heading">
+            <div>
+              <p className="fourpix-section-label">Upload Photo Mode</p>
+              <h2>Input alternatif</h2>
+            </div>
+          </div>
 
-            <input
-              ref={uploadInputRef}
-              className="slice04-upload-input"
-              type="file"
-              accept="image/png,image/jpeg,.png,.jpg,.jpeg"
-              onChange={(event) => void handleUploadChange(event)}
-              disabled={isUploading}
-            />
+          <p>
+            Gunakan upload kalau kamera belum tersedia atau pelanggan sudah membawa file foto.
+          </p>
 
+          <input
+            ref={uploadInputRef}
+            type="file"
+            accept="image/png,image/jpeg"
+            className="fourpix-hidden-input"
+            onChange={(event) => void handleUploadChange(event)}
+            disabled={isUploading}
+          />
+
+          <div className="fourpix-action-row">
             <button
               type="button"
-              className="slice04-upload-dropzone"
+              className="fourpix-secondary-button"
               onClick={() => uploadInputRef.current?.click()}
               disabled={isUploading}
             >
-              <strong>{isUploading ? "Membaca file..." : "Pilih JPG/PNG"}</strong>
-              <span>Maksimal 10 MB. File non-image akan ditolak.</span>
+              {isUploading ? "Membaca file..." : "Pilih JPG/PNG"}
             </button>
           </div>
 
-          {inputError ? <div className="slice04-error-box">{inputError}</div> : null}
+          {inputError ? <p className="fourpix-error">{inputError}</p> : null}
 
-          <PhotoInputPreview
-            photoInput={photoInput}
-            onClear={() => replacePhotoInput(null)}
-          />
+          <PhotoInputPreview photoInput={photoInput} onClear={() => replacePhotoInput(null)} />
 
-          <div className="slice04-scope-note">
-            <strong>Scope Slice 04</strong>
-            <span>
-              Capture dan upload hanya membuat preview input. Remove background,
-              compositing, adjustment, dan export dikerjakan di slice berikutnya.
-            </span>
+          <button
+            type="button"
+            className="fourpix-process-button"
+            disabled={!canProcess}
+            onClick={() => void handleProcessPhoto()}
+          >
+            {isRemovingBackground ? "Remove background lokal..." : "Process ke Preview Compositing"}
+          </button>
+
+          {processingError ? <p className="fourpix-error">{processingError}</p> : null}
+        </article>
+      </section>
+
+      <section className="fourpix-editor-grid">
+        <article className="fourpix-card fourpix-adjustment-card">
+          <div className="fourpix-card-heading">
+            <div>
+              <p className="fourpix-section-label">Slice 07</p>
+              <h2>Manual Adjustment</h2>
+            </div>
+            <button type="button" className="fourpix-secondary-button" onClick={resetAdjustment}>
+              Reset
+            </button>
           </div>
-        </aside>
-            <FourpixSlice05Panel />
-</section>
+
+          <div className="fourpix-background-picker">
+            <span>Background</span>
+            <div className="fourpix-preset-row">
+              {BACKGROUND_PRESETS.map((preset) => (
+                <button
+                  key={preset.value}
+                  type="button"
+                  className={preset.value === backgroundColor ? "fourpix-preset active" : "fourpix-preset"}
+                  onClick={() => setBackgroundColor(preset.value)}
+                  style={{ backgroundColor: preset.value }}
+                  aria-label={`Pilih background ${preset.label}`}
+                  title={preset.label}
+                />
+              ))}
+              <label className="fourpix-color-field">
+                Custom
+                <input
+                  type="color"
+                  value={backgroundColor}
+                  onChange={(event) => setBackgroundColor(event.target.value)}
+                />
+              </label>
+            </div>
+          </div>
+
+          <div className="fourpix-slider-stack">
+            <label>
+              <span>
+                Geser X <strong>{Math.round(adjustment.x)} px</strong>
+              </span>
+              <input
+                type="range"
+                min={-adjustmentLimits.maxTranslateX}
+                max={adjustmentLimits.maxTranslateX}
+                step="1"
+                value={adjustment.x}
+                onChange={(event) => handleAdjustmentChange("x", Number(event.target.value))}
+              />
+            </label>
+
+            <label>
+              <span>
+                Geser Y <strong>{Math.round(adjustment.y)} px</strong>
+              </span>
+              <input
+                type="range"
+                min={-adjustmentLimits.maxTranslateY}
+                max={adjustmentLimits.maxTranslateY}
+                step="1"
+                value={adjustment.y}
+                onChange={(event) => handleAdjustmentChange("y", Number(event.target.value))}
+              />
+            </label>
+
+            <label>
+              <span>
+                Scale / Zoom <strong>{adjustment.scale.toFixed(2)}×</strong>
+              </span>
+              <input
+                type="range"
+                min={adjustmentLimits.minScale}
+                max={adjustmentLimits.maxScale}
+                step="0.01"
+                value={adjustment.scale}
+                onChange={(event) => handleAdjustmentChange("scale", Number(event.target.value))}
+              />
+            </label>
+
+            <label>
+              <span>
+                Rotate <strong>{adjustment.rotation.toFixed(0)}°</strong>
+              </span>
+              <input
+                type="range"
+                min={adjustmentLimits.minRotation}
+                max={adjustmentLimits.maxRotation}
+                step="1"
+                value={adjustment.rotation}
+                onChange={(event) => handleAdjustmentChange("rotation", Number(event.target.value))}
+              />
+            </label>
+          </div>
+
+          <div className="fourpix-transform-readout">
+            <code>
+              x={Math.round(adjustment.x)} y={Math.round(adjustment.y)} scale=
+              {adjustment.scale.toFixed(2)} rotate={adjustment.rotation.toFixed(0)}°
+            </code>
+          </div>
+        </article>
+
+        <article className="fourpix-card">
+          <div className="fourpix-card-heading">
+            <div>
+              <p className="fourpix-section-label">Preview Compositing</p>
+              <h2>Hasil akhir sementara</h2>
+            </div>
+            {isComposing ? <span className="fourpix-status-pill fourpix-status-starting">Rendering...</span> : null}
+          </div>
+
+          <div className="fourpix-preview-grid">
+            <div className="fourpix-preview-box fourpix-transparent-preview">
+              <strong>PNG transparan</strong>
+              {removedSubjectUrl ? (
+                <img src={removedSubjectUrl} alt="Subject setelah remove background" />
+              ) : (
+                <span>Belum diproses</span>
+              )}
+            </div>
+
+            <div className="fourpix-preview-box">
+              <strong>Composited preview</strong>
+              {compositePreviewUrl ? (
+                <img src={compositePreviewUrl} alt="Preview compositing 4Pix Studio" />
+              ) : (
+                <span>Preview muncul setelah proses compositing</span>
+              )}
+            </div>
+          </div>
+
+          <p className="fourpix-info">
+            Adjustment X/Y, scale, rotate, reset, dan background color akan memicu ulang preview
+            compositing. Export final tetap masuk Slice 08.
+          </p>
+        </article>
+      </section>
     </main>
   );
 }

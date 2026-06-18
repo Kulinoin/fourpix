@@ -116,8 +116,8 @@ Non-scope:
 - Export final.
 
 Validation:
-- Pending automated validation.
-- Pending manual browser validation.
+- Automated validation PASS: frontend lint/build dan backend pytest.
+- Manual browser validation PASS: X/Y, scale/zoom, rotate ringan, reset, dan preview compositing berubah sesuai adjustment.
 
 Archive:
 - Pending.
@@ -173,3 +173,25 @@ Tanggal: 18 Juni 2026
 - Manual adjustment detail tetap scope Slice 07.
 - Export JPG/PNG final tetap scope Slice 08.
 - Manual browser validation tetap diperlukan untuk kamera fisik.
+
+---
+
+## Slice 07 — Manual Adjustment
+Tanggal: 18 Juni 2026
+
+### Implementasi
+- Menambahkan kontrol manual adjustment X/Y, scale/zoom, rotate ringan, dan reset.
+- Menghubungkan adjustment frontend ke preview compositing melalui payload `transform`.
+- Preview compositing otomatis re-render saat transform/background berubah.
+- Menambahkan clamp adjustment memakai limit template/fallback MVP.
+- Memperbaiki CORS backend agar POST remove-background dan compose dapat dipanggil dari frontend lokal.
+- Menambahkan test backend untuk transform manual.
+
+### Non-scope
+- Export JPG/PNG final tetap Slice 08.
+- Face landmark auto alignment belum dikerjakan.
+- Template editor visual belum dikerjakan.
+
+### Validasi
+- Automated validation PASS: frontend lint/build dan backend pytest.
+- Manual browser validation PASS: X/Y, scale/zoom, rotate ringan, reset, dan preview compositing berubah sesuai adjustment.
