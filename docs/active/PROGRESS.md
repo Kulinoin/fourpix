@@ -208,3 +208,30 @@ Catatan:
 - Menambahkan automated tests untuk export service dan route.
 - Commit/push belum dilakukan sampai validasi PASS dan user menyetujui.
 
+## Slice 09 — MVP Polish & Validation
+
+Status: Implemented, pending/with manual browser validation.
+
+Scope completed:
+- Polished main MVP flow in `apps/web/src/App.tsx`.
+- Added clear start screen for Live Camera Mode and Upload Photo Mode.
+- Added template selection, camera overlay controls, capture/upload input preview.
+- Added local remove background action and automatic compositing preview refresh.
+- Added manual adjustment controls for X/Y, scale, rotate, and reset.
+- Added background color presets and custom color.
+- Added JPG/PNG export controls using 3x4 and 4x6 profiles.
+- Improved loading, error, success, and empty states.
+- Updated README run guide and MVP checklist.
+- Added backend MVP endpoint validation tests.
+- Added manual validation checklist document.
+
+Validation required:
+- Backend pytest.
+- Frontend lint.
+- Frontend build.
+- Rebrand check.
+- Manual browser check for camera/liveview/export.
+
+Archive:
+- Created after validation PASS by Slice 09 script.
+
