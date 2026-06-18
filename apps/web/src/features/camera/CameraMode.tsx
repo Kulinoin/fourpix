@@ -1,167 +1,573 @@
-import { useState } from 'react'
-import type { TemplateSummary } from '../../types/templates'
-import { useCamera } from './useCamera'
-import { CameraOverlay, OverlayModeToggle, type OverlayMode } from '../overlay'
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ChangeEvent,
+} from "react";
+import {
+  captureVideoFrame,
+  createPhotoInputFromFile,
+  revokePhotoInput,
+  type PhotoInput,
+} from "../capture/captureImage";
+import { PhotoInputPreview } from "../capture/PhotoInputPreview";
+
+const API_BASE_URL =
+  (import.meta.env.VITE_API_BASE_URL as string | undefined) ??
+  (import.meta.env.VITE_API_URL as string | undefined) ??
+  "http://127.0.0.1:8404";
+
+type CameraTemplate = {
+  id: string;
+  name: string;
+  category?: string;
+  overlayGuideUrl?: string;
+  overlayPreviewUrl?: string;
+  thumbnailUrl?: string;
+  assets?: {
+    overlayGuide?: string;
+    overlayPreview?: string;
+    overlayGuideUrl?: string;
+    overlayPreviewUrl?: string;
+  };
+};
+
+type OverlayMode = "guide" | "template" | "none";
+type CameraStatus = "idle" | "starting" | "active" | "error";
 
 type CameraModeProps = {
-  template: TemplateSummary
-  onBack: () => void
+  selectedTemplate?: CameraTemplate | null;
+  template?: CameraTemplate | null;
+  onBack?: () => void;
+  onBackToTemplates?: () => void;
+  onBackToTemplateSelect?: () => void;
+  onBackToHome?: () => void;
+  onPhotoReady?: (photoInput: PhotoInput) => void;
+  onPhotoInputReady?: (photoInput: PhotoInput) => void;
+};
+
+function getErrorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  return "Terjadi error yang tidak diketahui.";
 }
 
-const statusText = {
-  idle: 'Belum aktif',
-  requesting: 'Meminta izin kamera',
-  active: 'Kamera aktif',
-  stopped: 'Kamera dihentikan',
-  error: 'Kamera error',
+function getCameraErrorMessage(error: unknown): string {
+  if (error instanceof DOMException) {
+    if (error.name === "NotAllowedError") {
+      return "Izin kamera ditolak. Aktifkan permission kamera di browser atau gunakan Upload Photo.";
+    }
+
+    if (error.name === "NotFoundError") {
+      return "Kamera tidak ditemukan. Sambungkan kamera atau gunakan Upload Photo.";
+    }
+
+    if (error.name === "NotReadableError") {
+      return "Kamera sedang dipakai aplikasi lain. Tutup aplikasi lain lalu coba lagi.";
+    }
+
+    if (error.name === "OverconstrainedError") {
+      return "Kamera tidak cocok dengan pengaturan yang diminta. Coba pilih kamera lain.";
+    }
+  }
+
+  return getErrorMessage(error);
 }
 
-export const CameraMode = ({ template, onBack }: CameraModeProps) => {
-  const [overlayMode, setOverlayMode] = useState<OverlayMode>('guide')
-  const {
-    videoRef,
-    devices,
-    selectedDeviceId,
-    status,
-    errorMessage,
-    supportsCamera,
-    startCamera,
-    stopCamera,
-    switchCamera,
-  } = useCamera()
+function isAbsoluteAssetUrl(url: string): boolean {
+  return /^(https?:|blob:|data:)/i.test(url);
+}
 
-  const isActive = status === 'active'
-  const isBusy = status === 'requesting'
+function joinUrl(baseUrl: string, path: string): string {
+  return `${baseUrl.replace(/\/+$/, "")}/${path.replace(/^\/+/, "")}`;
+}
+
+function resolveTemplateAssetUrl(
+  template: CameraTemplate | null,
+  assetUrl: string | undefined,
+): string | null {
+  if (!assetUrl) return null;
+
+  if (isAbsoluteAssetUrl(assetUrl)) {
+    return assetUrl;
+  }
+
+  if (assetUrl.startsWith("/")) {
+    return joinUrl(API_BASE_URL, assetUrl);
+  }
+
+  if (template?.id) {
+    return joinUrl(API_BASE_URL, `/templates/${template.id}/${assetUrl}`);
+  }
+
+  return joinUrl(API_BASE_URL, assetUrl);
+}
+
+function getOverlayAssetSource(
+  template: CameraTemplate | null,
+  overlayMode: OverlayMode,
+): string | null {
+  if (!template || overlayMode === "none") return null;
+
+  if (overlayMode === "guide") {
+    return (
+      template.overlayGuideUrl ??
+      template.assets?.overlayGuideUrl ??
+      template.assets?.overlayGuide ??
+      null
+    );
+  }
 
   return (
-    <section className="camera-mode">
-      <div className="camera-topbar">
-        <button className="ghost-button" type="button" onClick={onBack}>
-          ← Kembali pilih template
-        </button>
+    template.overlayPreviewUrl ??
+    template.assets?.overlayPreviewUrl ??
+    template.assets?.overlayPreview ??
+    null
+  );
+}
 
-        <div className={`camera-status camera-status--${status}`}>
-          <span />
-          {statusText[status]}
+export function CameraMode({
+  selectedTemplate,
+  template,
+  onBack,
+  onBackToTemplates,
+  onBackToTemplateSelect,
+  onBackToHome,
+  onPhotoReady,
+  onPhotoInputReady,
+}: CameraModeProps) {
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const uploadInputRef = useRef<HTMLInputElement | null>(null);
+  const activeStreamRef = useRef<MediaStream | null>(null);
+  const currentPhotoInputRef = useRef<PhotoInput | null>(null);
+
+  const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
+  const [selectedDeviceId, setSelectedDeviceId] = useState("");
+  const [cameraStatus, setCameraStatus] = useState<CameraStatus>("idle");
+  const [cameraError, setCameraError] = useState<string | null>(null);
+  const [overlayMode, setOverlayMode] = useState<OverlayMode>("guide");
+  const [overlayAssetError, setOverlayAssetError] = useState<string | null>(null);
+  const [photoInput, setPhotoInput] = useState<PhotoInput | null>(null);
+  const [inputError, setInputError] = useState<string | null>(null);
+  const [isCapturing, setIsCapturing] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
+
+  const activeTemplate = useMemo(
+    () => selectedTemplate ?? template ?? null,
+    [selectedTemplate, template],
+  );
+
+  const handleBack = onBack ?? onBackToTemplates ?? onBackToTemplateSelect ?? onBackToHome;
+
+  const overlayAssetSource = getOverlayAssetSource(activeTemplate, overlayMode);
+  const overlayImageUrl = resolveTemplateAssetUrl(activeTemplate, overlayAssetSource ?? undefined);
+  const shouldShowGeneratedGuide =
+    overlayMode === "guide" && (!overlayImageUrl || Boolean(overlayAssetError));
+
+  const canCapture = cameraStatus === "active" && !isCapturing;
+
+  const emitPhotoInput = useCallback(
+    (nextPhotoInput: PhotoInput) => {
+      onPhotoReady?.(nextPhotoInput);
+      onPhotoInputReady?.(nextPhotoInput);
+    },
+    [onPhotoInputReady, onPhotoReady],
+  );
+
+  const replacePhotoInput = useCallback(
+    (nextPhotoInput: PhotoInput | null) => {
+      if (
+        currentPhotoInputRef.current &&
+        currentPhotoInputRef.current.objectUrl !== nextPhotoInput?.objectUrl
+      ) {
+        revokePhotoInput(currentPhotoInputRef.current);
+      }
+
+      currentPhotoInputRef.current = nextPhotoInput;
+      setPhotoInput(nextPhotoInput);
+
+      if (nextPhotoInput) {
+        emitPhotoInput(nextPhotoInput);
+      }
+    },
+    [emitPhotoInput],
+  );
+
+  const stopActiveStream = useCallback(() => {
+    activeStreamRef.current?.getTracks().forEach((track) => track.stop());
+    activeStreamRef.current = null;
+
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
+    }
+  }, []);
+
+  const stopCamera = useCallback(() => {
+    stopActiveStream();
+    setCameraStatus("idle");
+  }, [stopActiveStream]);
+
+  const loadCameraDevices = useCallback(async () => {
+    if (!navigator.mediaDevices?.enumerateDevices) {
+      setDevices([]);
+      return;
+    }
+
+    const mediaDevices = await navigator.mediaDevices.enumerateDevices();
+    const videoDevices = mediaDevices.filter(
+      (device) => device.kind === "videoinput",
+    );
+
+    setDevices(videoDevices);
+
+    if (!selectedDeviceId) {
+      const firstDeviceId = videoDevices.find((device) => device.deviceId)
+        ?.deviceId;
+
+      if (firstDeviceId) {
+        setSelectedDeviceId(firstDeviceId);
+      }
+    }
+  }, [selectedDeviceId]);
+
+  const startCamera = useCallback(
+    async (deviceId?: string) => {
+      if (!navigator.mediaDevices?.getUserMedia) {
+        setCameraStatus("error");
+        setCameraError(
+          "Browser ini belum mendukung akses kamera. Gunakan browser modern atau Upload Photo.",
+        );
+        return;
+      }
+
+      setCameraStatus("starting");
+      setCameraError(null);
+      stopActiveStream();
+
+      try {
+        const videoConstraints: MediaTrackConstraints = deviceId
+          ? {
+              deviceId: { exact: deviceId },
+              width: { ideal: 1080 },
+              height: { ideal: 1440 },
+              aspectRatio: { ideal: 0.75 },
+            }
+          : {
+              facingMode: "user",
+              width: { ideal: 1080 },
+              height: { ideal: 1440 },
+              aspectRatio: { ideal: 0.75 },
+            };
+
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: videoConstraints,
+          audio: false,
+        });
+
+        activeStreamRef.current = stream;
+
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          await videoRef.current.play();
+        }
+
+        const activeDeviceId =
+          stream.getVideoTracks()[0]?.getSettings().deviceId ?? "";
+
+        if (activeDeviceId && !selectedDeviceId) {
+          setSelectedDeviceId(activeDeviceId);
+        }
+
+        setCameraStatus("active");
+        await loadCameraDevices();
+      } catch (error) {
+        stopActiveStream();
+        setCameraStatus("error");
+        setCameraError(getCameraErrorMessage(error));
+      }
+    },
+    [loadCameraDevices, selectedDeviceId, stopActiveStream],
+  );
+
+  useEffect(() => {
+    void startCamera(selectedDeviceId || undefined);
+
+    return () => {
+      stopActiveStream();
+    };
+  }, [selectedDeviceId, startCamera, stopActiveStream]);
+
+  useEffect(() => {
+    setOverlayAssetError(null);
+  }, [activeTemplate?.id, overlayMode, overlayImageUrl]);
+
+  useEffect(() => {
+    return () => {
+      revokePhotoInput(currentPhotoInputRef.current);
+    };
+  }, []);
+
+  const handleCapture = useCallback(async () => {
+    if (!videoRef.current) {
+      setInputError("Liveview kamera belum tersedia.");
+      return;
+    }
+
+    setIsCapturing(true);
+    setInputError(null);
+
+    try {
+      const nextPhotoInput = await captureVideoFrame(videoRef.current, {
+        mimeType: "image/png",
+      });
+
+      replacePhotoInput(nextPhotoInput);
+    } catch (error) {
+      setInputError(getErrorMessage(error));
+    } finally {
+      setIsCapturing(false);
+    }
+  }, [replacePhotoInput]);
+
+  const handleUploadChange = useCallback(
+    async (event: ChangeEvent<HTMLInputElement>) => {
+      const file = event.target.files?.[0];
+      event.target.value = "";
+
+      if (!file) return;
+
+      setIsUploading(true);
+      setInputError(null);
+
+      try {
+        const nextPhotoInput = await createPhotoInputFromFile(file);
+        replacePhotoInput(nextPhotoInput);
+      } catch (error) {
+        setInputError(getErrorMessage(error));
+      } finally {
+        setIsUploading(false);
+      }
+    },
+    [replacePhotoInput],
+  );
+
+  return (
+    <main className="slice04-camera">
+      <header className="slice04-topbar">
+        <div className="slice04-titleblock">
+          <span className="slice04-kicker">4Pix Studio</span>
+          <h1>Capture & Upload Photo</h1>
+          <p>
+            Ambil foto dari live camera atau upload JPG/PNG sebagai input awal
+            sebelum remove background.
+          </p>
         </div>
-      </div>
 
-      <div className="camera-layout">
-        <div className="camera-preview-card">
-          <div className="camera-preview camera-preview--with-overlay">
-            <OverlayModeToggle
-              mode={overlayMode}
-              onChange={setOverlayMode}
-              disabled={!isActive}
-            />
+        <div className="slice04-topbar-actions">
+          {activeTemplate ? (
+            <span className="slice04-template-pill">{activeTemplate.name}</span>
+          ) : (
+            <span className="slice04-template-pill slice04-template-pill-muted">
+              Template belum dipilih
+            </span>
+          )}
 
+          {handleBack ? (
+            <button type="button" className="slice04-secondary-button" onClick={handleBack}>
+              Kembali
+            </button>
+          ) : null}
+        </div>
+      </header>
+
+      <section className="slice04-layout">
+        <div className="slice04-live-card">
+          <div className="slice04-live-header">
+            <div>
+              <span className="slice04-kicker">Live Camera</span>
+              <h2>Posisikan wajah sesuai overlay</h2>
+            </div>
+
+            <span className={`slice04-live-status slice04-live-status-${cameraStatus}`}>
+              {cameraStatus === "active"
+                ? "Kamera aktif"
+                : cameraStatus === "starting"
+                  ? "Menyalakan kamera"
+                  : cameraStatus === "error"
+                    ? "Kamera error"
+                    : "Kamera standby"}
+            </span>
+          </div>
+
+          <div className="slice04-stage">
             <video
               ref={videoRef}
-              className="camera-video"
+              className="slice04-video"
               autoPlay
-              playsInline
               muted
+              playsInline
             />
 
-            {isActive && <CameraOverlay mode={overlayMode} template={template} />}
-
-            {!isActive && (
-              <div className="camera-empty-state">
-                <p className="camera-empty-title">Live camera belum aktif</p>
-                <p>
-                  Klik <strong>Start Camera</strong> untuk membuka liveview.
-                  Overlay guide/template aktif setelah kamera berjalan.
-                </p>
+            {cameraStatus !== "active" ? (
+              <div className="slice04-stage-placeholder">
+                {cameraStatus === "starting"
+                  ? "Menyiapkan liveview kamera..."
+                  : "Liveview belum aktif"}
               </div>
-            )}
+            ) : null}
+
+            {overlayMode !== "none" && overlayImageUrl && !overlayAssetError ? (
+              <img
+                className="slice04-overlay-image"
+                src={overlayImageUrl}
+                alt={
+                  overlayMode === "guide"
+                    ? "Overlay guide pas foto"
+                    : "Overlay preview template"
+                }
+                draggable={false}
+                onError={() => {
+                  setOverlayAssetError(
+                    overlayMode === "guide"
+                      ? "Overlay guide asset gagal dimuat, fallback guide aktif."
+                      : "Overlay template asset gagal dimuat. Cek backend/template asset.",
+                  );
+                }}
+              />
+            ) : null}
+
+            {shouldShowGeneratedGuide ? (
+              <div className="slice04-generated-guide" aria-hidden="true">
+                <span className="slice04-guide-line slice04-guide-line-vertical" />
+                <span className="slice04-guide-oval" />
+                <span className="slice04-guide-line slice04-guide-line-eye" />
+                <span className="slice04-guide-line slice04-guide-line-chin" />
+                <span className="slice04-guide-line slice04-guide-line-shoulder" />
+              </div>
+            ) : null}
+
+            {overlayMode === "template" && overlayAssetError ? (
+              <div className="slice04-overlay-warning">
+                {overlayAssetError}
+              </div>
+            ) : null}
           </div>
 
-          {errorMessage && (
-            <div className="camera-error" role="alert">
-              {errorMessage}
-            </div>
-          )}
+          {cameraError ? (
+            <div className="slice04-error-box">{cameraError}</div>
+          ) : null}
 
-          {!supportsCamera && (
-            <div className="camera-error" role="alert">
-              Browser ini belum mendukung akses kamera. Coba gunakan Chrome,
-              Edge, atau browser modern lain melalui localhost.
-            </div>
-          )}
+          {overlayMode === "guide" && overlayAssetError ? (
+            <div className="slice04-info-box">{overlayAssetError}</div>
+          ) : null}
+
+          <div className="slice04-controls">
+            <button
+              type="button"
+              className="slice04-primary-button"
+              disabled={!canCapture}
+              onClick={() => void handleCapture()}
+            >
+              {isCapturing ? "Mengambil foto..." : "Capture Foto"}
+            </button>
+
+            <button
+              type="button"
+              className="slice04-secondary-button"
+              onClick={() => void startCamera(selectedDeviceId || undefined)}
+            >
+              Restart Kamera
+            </button>
+
+            <button type="button" className="slice04-secondary-button" onClick={stopCamera}>
+              Stop Kamera
+            </button>
+          </div>
+
+          <div className="slice04-field-grid">
+            <label className="slice04-field">
+              <span>Kamera</span>
+              <select
+                value={selectedDeviceId}
+                onChange={(event) => setSelectedDeviceId(event.target.value)}
+              >
+                {devices.length === 0 ? (
+                  <option value="">Default browser camera</option>
+                ) : (
+                  devices.map((device, index) => (
+                    <option
+                      key={device.deviceId || `camera-${index}`}
+                      value={device.deviceId}
+                    >
+                      {device.label || `Kamera ${index + 1}`}
+                    </option>
+                  ))
+                )}
+              </select>
+            </label>
+
+            <label className="slice04-field">
+              <span>Overlay</span>
+              <select
+                value={overlayMode}
+                onChange={(event) => setOverlayMode(event.target.value as OverlayMode)}
+              >
+                <option value="guide">Guide Overlay</option>
+                <option value="template">Template Transparan</option>
+                <option value="none">Tanpa Overlay</option>
+              </select>
+            </label>
+          </div>
         </div>
 
-        <aside className="camera-panel">
-          <div className="panel-card">
-            <p className="panel-eyebrow">Template aktif</p>
-            <h2>{template.name}</h2>
-            <p className="muted-text">
-              ID: <code>{template.id}</code>
+        <aside className="slice04-input-panel">
+          <div className="slice04-upload-card">
+            <span className="slice04-kicker">Upload Photo Mode</span>
+            <h2>Upload foto alternatif</h2>
+            <p>
+              Gunakan mode ini kalau kamera belum tersedia atau pelanggan sudah
+              membawa file foto.
             </p>
-            <p className="muted-text">
-              Category: <code>{template.category}</code>
-            </p>
-          </div>
 
-          <div className="panel-card">
-            <p className="panel-eyebrow">Kontrol kamera</p>
+            <input
+              ref={uploadInputRef}
+              className="slice04-upload-input"
+              type="file"
+              accept="image/png,image/jpeg,.png,.jpg,.jpeg"
+              onChange={(event) => void handleUploadChange(event)}
+              disabled={isUploading}
+            />
 
-            <label className="field-label" htmlFor="camera-device">
-              Camera device
-            </label>
-            <select
-              id="camera-device"
-              className="camera-select"
-              value={selectedDeviceId}
-              disabled={devices.length === 0 || isBusy}
-              onChange={(event) => {
-                void switchCamera(event.target.value)
-              }}
+            <button
+              type="button"
+              className="slice04-upload-dropzone"
+              onClick={() => uploadInputRef.current?.click()}
+              disabled={isUploading}
             >
-              {devices.length === 0 ? (
-                <option value="">Device belum terbaca</option>
-              ) : (
-                devices.map((device) => (
-                  <option key={device.deviceId} value={device.deviceId}>
-                    {device.label}
-                  </option>
-                ))
-              )}
-            </select>
-
-            <div className="camera-actions">
-              <button
-                className="primary-button"
-                type="button"
-                disabled={isBusy || !supportsCamera}
-                onClick={() => {
-                  void startCamera()
-                }}
-              >
-                {isBusy ? 'Membuka kamera...' : 'Start Camera'}
-              </button>
-
-              <button
-                className="secondary-button"
-                type="button"
-                disabled={!isActive}
-                onClick={stopCamera}
-              >
-                Stop Camera
-              </button>
-            </div>
+              <strong>{isUploading ? "Membaca file..." : "Pilih JPG/PNG"}</strong>
+              <span>Maksimal 10 MB. File non-image akan ditolak.</span>
+            </button>
           </div>
 
-          <div className="panel-card panel-card--soft">
-            <p className="panel-eyebrow">Catatan Slice 02</p>
-            <ul className="mini-list">
-              <li>Liveview kamera aktif dari browser.</li>
-              <li>Overlay guide/template tampil dari asset template.</li>
-              <li>Capture foto masuk Slice 04.</li>
-              <li>Proses foto tetap local-first.</li>
-            </ul>
+          {inputError ? <div className="slice04-error-box">{inputError}</div> : null}
+
+          <PhotoInputPreview
+            photoInput={photoInput}
+            onClear={() => replacePhotoInput(null)}
+          />
+
+          <div className="slice04-scope-note">
+            <strong>Scope Slice 04</strong>
+            <span>
+              Capture dan upload hanya membuat preview input. Remove background,
+              compositing, adjustment, dan export dikerjakan di slice berikutnya.
+            </span>
           </div>
         </aside>
-      </div>
-    </section>
-  )
+      </section>
+    </main>
+  );
 }
+
+export default CameraMode;

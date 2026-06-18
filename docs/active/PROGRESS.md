@@ -97,3 +97,50 @@ Notes:
 - Guide/Template toggle works.
 - Overlay asset URL resolution through `VITE_API_BASE_URL` works.
 - Slice 03 is ready for final archive and user-approved commit/push.
+
+## Slice 04 — Capture & Upload Photo
+
+Status: Implemented, pending validation result.
+
+Scope:
+- Capture frame dari live camera ke image input.
+- Upload JPG/PNG alternatif.
+- Validasi file upload.
+- Preview input photo.
+- Menyiapkan data input untuk Slice 05 Local Background Removal.
+
+Non-scope:
+- Remove background.
+- Template compositing.
+- Manual adjustment final.
+- Export final.
+
+Validation:
+- Pending automated validation.
+- Pending manual browser validation.
+
+Archive:
+- Pending.
+
+### Slice 04 Manual Validation Fix
+
+Manual validation first attempt was not PASS:
+- Overlay guide/template did not display.
+- Upload JPG/PNG did not produce preview.
+
+Fix applied:
+- Resolve overlay asset URL against backend API base.
+- Add guide fallback when guide asset fails.
+- Improve upload input trigger and JPG/PNG validation.
+
+### Slice 04 Validation Result
+
+Status: PASS implemented and validated.
+
+Validation:
+- Frontend lint/build PASS.
+- Backend pytest PASS via `apps/api/.venv/bin/python`.
+- Manual browser validation PASS.
+
+Archive:
+- `archives/2026-06-18_185816_slice-04_capture-upload-photo.zip`
