@@ -154,3 +154,22 @@ Archive:
 - Added capture guideline: background putih/terang bersih and pencahayaan rata for more stable local AI result.
 - Confirmed this slice does not implement compositing, manual adjustment, export, or model training.
 - Archive must be created after validation PASS before commit/push.
+
+---
+
+## Slice 06 — Template Compositing
+
+Tanggal: 18 Juni 2026
+
+### Implementasi
+
+- Menambahkan backend compositor berbasis Pillow.
+- Menambahkan endpoint POST /process/compose.
+- Menambahkan frontend helper compositing API.
+- Menambahkan test backend untuk render order background → layer back → subject → layer front.
+
+### Catatan
+
+- Manual adjustment detail tetap scope Slice 07.
+- Export JPG/PNG final tetap scope Slice 08.
+- Manual browser validation tetap diperlukan untuk kamera fisik.

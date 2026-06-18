@@ -36,7 +36,9 @@ def health() -> dict[str, str]:
 
 # Slice 01: Template Registry
 from app.routes.templates import router as templates_router
+from app.routes.compose import router as compose_router
 
 app.include_router(templates_router)
 
 app.include_router(process.router)
+app.include_router(compose_router)
